@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en"
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="stylesheet" href="w3.css">
+    <title>Lighthouse alarm clock<</title>
+    <style>
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 26px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background-color: #ccc;
+    transition: .2s;
+    border-radius: 26px;
+}
+
+.slider:before {
+    content: "";
+    position: absolute;
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    top: 3px;
+    background-color: white;
+    transition: .2s;
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: #2196F3;
+}
+
+input:checked + .slider:before {
+    transform: translateX(24px);
+}
+</style>
+</head>
+    <title>Main clock settings</title>
+
+<body onload="getConfig()">
+<div class="w3-container w3-blue" id="title">
+    <h2 id="TitleText">
+    Lighthouse alarm clock settings</h2>
+</div>
+<div class="w3-bar w3-blue" id="menu">
+    <a href="main.html" class="w3-bar-item w3-button"><img src= "img/home.png"/></a>
+    <a href="network.html" class="w3-bar-item w3-buttone"><img src="img/settings.png"/></a>
+</div>
+<p>Manage clock settings</p>
+<table><td>
+    <label>Clock timezone</label></td>
+    <td>
+<select id="timezone"></select>
+
+<script>
+const select = document.getElementById("timezone");
+
+for (let i = -12; i <= 12; i++) {
+    const option = document.createElement("option");
+
+    option.value = i;
+    option.textContent = "UTC" + (i >= 0 ? "+" : "") + i;
+    select.appendChild(option);
+}
+</script> <label id="timezone_info"></label>
+</td></tr>
+<tr><td>
+<label>Clock Snooze length</label></td>
+<td>
+<select id="snooze">
+    <option value="5">5 mins</option>
+    <option value="9">9 mins</option>
+    <option value="15">15 mins</option>
+</select>
+</td>
+</tr>
+<tr>
+    <td>
+        <label>Pre alarm sunrise</label>
+    </td>
+    <td>
+    <select id="sunrise">
+        <option value="10">10 mins</option>
+        <option value="20">20 mins</option>
+        <option value="30">30 mins</option>
+    </select>
+    </td>
+</tr>
+<tr>
+    <td><label>1st Preset alarm </label></td>
+    <td><input class="w3-input" type="time" id="Preset1"></td>
+</tr>
+<tr>
+    <td><label>2nd Preset alarm </label></td>
+    <td><input class="w3-input" type="time" id="Preset2"></td>
+</tr>
+<tr>
+    <td><label>3rd Preset alarm </label></td>
+    <td><input class="w3-input" type="time" id="Preset3"></td>
+</tr>
+<tr>
+    <td>Sync timezone from internet</td>
+    <td>
+    <label class="switch">
+        <input type="checkbox" id="tzSync" onchange="toggleTimeZone()">
+    <span class="slider"></span>
+</label>
+    </td>
+</tr>
+<tr>
+    <td>Factory reset</td>
+    <td><input type="button" class="w3-button w3-red w3-round-xxlarge w3-hover-teal" onclick="factoryReset()" id="factoryReset" name="FactoryReset" value="Start factory reset"> </td>
+</tr>
+</table>
+<p>
+    <input type="button" class="w3-button w3-blue w3-round-xxlarge w3-hover-teal" onclick="saveConfig()" id="save" name="saveConfig" value="Save"> 
+</p>
+<script>
+
+async function factoryReset() {
+
+    if (confirm("Start factory reset ?")==true) {
+        
+        poststr="/factoryreset";
+        const response=await fetch(poststr);
+        if (response.ok) {
+            alert("Follow instructions on the clock display to complete factory reset");
+            window.location.href="/index.html"
+        }
+    }
+}    
+function zeroPad(num, places) {
+  var zero = places - num.toString().length + 1;
+  return Array(+(zero > 0 && zero)).join("0") + num;
+} 
+
+function timeToMinutes(time) {
+    const [hours, minutes] = time.split(":").map(Number);
+    return hours * 60 + minutes;
+}
+
+function toggleTimeZone() {
+    document.getElementById("timezone").disabled =
+        document.getElementById("tzSync").checked;
+}
+
+async function saveConfig() {
+    poststr="/saveclockconfig/"
+    const button=document.getElementById("save")
+    button.disabled=true;
+    button.value="Saving..."
+    const tz=document.getElementById("timezone").value;
+    const snooze=document.getElementById("snooze").value;
+    const sunrise=document.getElementById("sunrise").value;
+    const preset1 = timeToMinutes(document.getElementById("Preset1").value);
+    const preset2 = timeToMinutes(document.getElementById("Preset2").value);
+    const preset3 = timeToMinutes(document.getElementById("Preset3").value);
+    const cTime= Math.round(Date.now()/1000);
+    let tzsync=0;
+    if (document.getElementById("tzSync").checked) {
+        tzsync=1;
+    }
+    poststr=poststr+tz+"/"+snooze+"/"+sunrise+"/"+preset1+"/"+preset2+"/"+preset3+"/"+tzsync+"/"+cTime;
+    const response=await fetch(poststr); 
+    if (response.ok) {
+        button.disabled=false;
+        button.value="Save";
+    } 
+    else {
+        button.value="Error saving";
+    }
+    location.reload();
+}
+async function getConfig(){
+    poststr='/getclockconfig';
+    
+
+    const response= await fetch(poststr);
+    console.log(response);
+
+    if (response.ok) {
+        const data= await response.json();
+        tz=data.timezone/4;
+        document.getElementById("timezone").value=tz;
+        document.getElementById("snooze").value=data.snooze;
+        document.getElementById("sunrise").value=data.sunrise;
+        document.getElementById("timezone_info").textContent=data.timezone_info;
+        let timeHH=Math.floor(data.preset1/60);
+        let timeMM=data.preset1-timeHH*60;
+        let timePreset=zeroPad(timeHH,2)+":"+zeroPad(timeMM,2);
+        document.getElementById("Preset1").value=timePreset;
+        timeHH=Math.floor(data.preset2/60);
+        timeMM=data.preset2-timeHH*60;
+        timePreset=zeroPad(timeHH,2)+":"+zeroPad(timeMM,2);
+        document.getElementById("Preset2").value=timePreset;
+        timeHH=Math.floor(data.preset3/60);
+        timeMM=data.preset3-timeHH*60;
+        timePreset=zeroPad(timeHH,2)+":"+zeroPad(timeMM,2);
+        document.getElementById("Preset3").value=timePreset;
+        if (data.tzsync==0) {
+            document.getElementById("tzSync").checked=false;
+        }
+        else {
+            document.getElementById("tzSync").checked=true;
+        }
+        toggleTimeZone();
+        
+
+        
+    }
+}
+</script>
+
+</body>
+</html>

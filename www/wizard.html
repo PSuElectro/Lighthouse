@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en"
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="stylesheet" href="w3.css">
+    <title>My Watch Winder<</title>
+</head>
+    <title>Lighthouse Setup Wizard</title>
+</head>
+<body onload="startSetup()">
+<div class="w3-container w3-blue">
+    <h2>
+    Lighthouse alarm clock setup</h2>
+</div>
+<p>Please complete all below information to complete setup</p>
+<label>Clock timezone </label>
+<select id="timezone"></select>
+
+<script>
+const select = document.getElementById("timezone");
+
+for (let i = -12; i <= 12; i++) {
+    const option = document.createElement("option");
+
+    option.value = i;
+    option.textContent = "UTC" + (i >= 0 ? "+" : "") + i;
+    if (i === 0) option.selected = true;
+    select.appendChild(option);
+}
+</script>
+<br>
+<label>
+ Snooze length   
+</label>
+<select id="snooze">
+    <option value="5">5 mins</option>
+    <option value="9">9 mins</option>
+    <option value="15">15 mins</option>
+</select>
+<br>
+<label>
+    Sunrise effect
+</label>
+<select id="sunrise">
+    <option value="10">10 mins</option>
+    <option value="20">20 mins</option>
+    <option value="30">30 mins</option>
+</select><br><p>
+<button class="w3-button w3-blue w3-round-xxlarge w3-hover-teal" onclick="saveSettings()" name="SaveButton">Save settings</button>
+<script>
+
+async function saveSettings() {
+    const TimeZone=document.getElementById('timezone').value;
+    const snooze=document.getElementById('snooze').value;
+    const sunrise=document.getElementById('sunrise').value;
+    const d=new Date();
+    const cTime= Math.round(Date.now()/1000);
+    const poststr="/savewizard/"+TimeZone+"/"+snooze+"/"+sunrise+"/"+cTime;
+    const response=await fetch(poststr); 
+    if (response.ok){
+        window.location.href = "/network.html"
+    }
+}
+
+ async function startSetup(){
+        poststr='/startsetup';
+        const response=await fetch(poststr);
+        const data=await response.json();
+    }
+</script>
+</body>
+</html>

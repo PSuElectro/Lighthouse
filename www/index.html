@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lighthouse</title>
+</head>
+<body>
+<script>
+fetch("/getsetupstate")
+    .then(response => response.json())
+    .then(data => {
+        if (data.Setup_complete) {
+            window.location.href = "/main.html";
+        } else {
+            window.location.href = "/wizard.html";
+        }
+    });
+</script>
+</body>
+</html>

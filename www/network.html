@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="stylesheet" href="w3.css">
+    <title>Lighthouse alarm clock</title>
+</head>
+<body onload="getConfig()" >
+<div class="w3-container w3-blue" id="title">
+    <h2 id="TitleText">
+    Lighthouse alarm clock setup</h2>
+</div>
+<div class="w3-bar w3-blue" id="menu">
+    <a href="main.html" class="w3-bar-item w3-button"><img src= "img/home.png"/></a>
+    <a href="network.html" class="w3-bar-item w3-buttone"><img src="img/settings.png"/></a>
+</div>
+<div id="setup">
+<p>Mandatory settings have now been completed. You can also do initial networking setup on this page to connect the clock to a local network and enable time syncronization from the internet.</p>
+</div>
+<div id="settings" >
+    <p>Manage the alarm clocks network settings</p>
+</div>
+<div class="w3-panel w3-border-bottom">
+Add or Remove Wifi connections for the Lighthouse
+</div>
+    <div id="Status">
+        <p id="StatusTxt"></p>
+    </div>   
+
+ <div id="Hostname">
+    <h3>Clock network hostname</h3>
+    <p id="hostname"></p> <input type="button" class="w3-button w3-blue w3-round-xxlarge w3-hover-teal" onclick="ChangeHostname()" value="Change Hostname">
+ </div>   
+
+<div id="CurrentWifi">
+    <h3>Current connection information</h3>
+    <p id="CurrentWifiTxt"></p>
+</div>
+
+
+<div id="AvailableWifis">
+    <h3>Available Wifi Networks</h3>
+    <p id="AvailableWifisTxt"></p>
+</div>
+<br>
+<input type="button" class="w3-button w3-blue w3-round-xxlarge w3-hover-teal" onclick="GoToMain()" id="Complete" name="Complete" value="Finish setup"> 
+<script>
+
+async function GoToMain() {
+    window.location.href = "/main.html";  
+}
+
+async function RenameAPMode() {
+    let NewAP=prompt("Please enter new AP name");
+     if (NewAP==null){
+        return;
+    }
+    poststr='/rename_ap/'+NewAP;
+    const response=await fetch(poststr); 
+    if (response.ok) {
+        const data=await response.json();
+        let msg=''
+        if (data.result==0){
+            msg='SUCCESS: ' + data.msg;
+        }
+        else {
+            msg='ERROR: ' + data.msg;
+        }
+        alert(msg);
+    }
+}
+
+async function ChangePW() {
+    let NewPW=prompt("Please enter new AP Password");
+     if (NewPW==null){
+        return;
+    }
+    poststr='/change_ap_pw/'+NewPW;
+    const response=await fetch(poststr); 
+    if (response.ok) {
+        const data=await response.json();
+        let msg=''
+        if (data.result==0){
+            msg='SUCCESS: ' + data.msg;
+        }
+        else {
+            msg='ERROR: ' + data.msg;
+        }
+        alert(msg);
+    }
+}
+async function connectWifi(SSID) {
+    poststr='/connectwifi/'+SSID;
+    const response=await fetch(poststr); 
+    if (response.ok) {
+        const data=await response.json();
+        let msg=''
+        if (data.result==0){
+            msg='SUCCESS: ' + data.msg;
+        }
+        else {
+            msg='ERROR: ' + data.msg;
+        }
+        alert(msg);
+    }
+}
+
+async function ChangeHostname() {
+    let HostName=prompt("Enter new hostname");
+    if (HostName==null){
+        return;
+    }
+    poststr='/changehostname/'+HostName;
+    const response=await fetch(poststr);
+    if (response.ok) {
+        const data=await response.json();
+        let msg='';
+        if (data.result==0){
+            alert("Hostname changed, wait for the clock to restart and then click OK.")
+            window.location.href ="http://"+ HostName;
+        }
+        else {
+            alert("Name Change failed")
+        }
+    }
+}
+
+async function joinWifi(SSID) {
+    let psk=prompt("Enter the Passkey for this WLAN network");
+    if (psk==null){
+        return;
+    }
+    poststr='/joinwifi/'+SSID+'/'+psk;
+    const response=await fetch(poststr); 
+    if (response.ok) {
+        const data=await response.json();
+        let msg=''
+        if (data.result==0){
+            msg='SUCCESS: ' + data.msg;
+        }
+        else {
+            msg='ERROR: ' + data.msg;
+        }
+        alert(msg);
+    }
+}
+
+async function deleteWifi(SSID){
+    poststr='/deletewifi/'+SSID;
+    const response=await fetch(poststr); 
+    if (response.ok) {
+        const data=await response.json();
+        let msg=''
+        if (data.result==0){
+            msg='SUCCESS: ' + data.msg;
+        }
+        else {
+            msg='ERROR: ' + data.msg;
+        }
+        alert(msg);
+        getConfig();
+    } 
+}
+
+async function switchMode() {
+    poststr='/switchtoap';
+    const response=await fetch(poststr);
+    if (response.ok) {
+        const data=await response.json();
+        let msg=''
+        if (data.result==0){
+            msg='SUCCESS: ' + data.msg;
+        }
+        else {
+            msg='ERROR: ' + data.msg;
+        }
+        alert(msg);
+    }
+}
+
+async function getConfig(){
+    poststr='/getnetconfig';
+    
+
+    const response= await fetch(poststr);
+    console.log(response);
+
+    if (response.ok) {
+        const data= await response.json();
+        const WifiMode=data.mode;
+        const PageMode=data.init;
+        const HostName=data.hostname;
+        const ConnectedSSID=data.connected_ssid; 
+        let AvailableSSID=''  
+        let KnownSSID=''
+        let btnText=''  
+        let SwitchMode=''
+        if (PageMode=="1") {
+            document.getElementById("setup").style.display = "block";
+            document.getElementById("settings").style.display = "none";
+            document.getElementById("menu").style.display = "none";
+        } else {
+            document.getElementById("setup").style.display = "none";
+            document.getElementById("settings").style.display = "block";
+            document.getElementById("Complete").style.display = "none";
+            document.getElementById("TitleText").textContent = "Lighthouse network settings";
+             document.getElementById("menu").style.display = "block";
+        }
+        if (WifiMode=='STA') {
+            SwitchMode="<button class=\"w3-button w3-blue w3-round-xxlarge w3-hover-teal\" onclick=\"switchMode()\" name=\"SwitchButton\">Switch to AP mode</button>";
+        }  
+        else {
+            SwitchMode="<button class=\"w3-button w3-blue w3-round-xxlarge w3-hover-teal\" onclick=\"RenameAPMode()\" name=\"NameButton\">Rename AP mode</button>" + 
+            "<button class=\"w3-button w3-blue w3-round-xxlarge w3-hover-teal\" onclick=\"ChangePW()\" name=\"PWButton\">Change AP Passkey</button>" ;
+        }
+        document.getElementById("hostname").innerHTML=HostName;
+        document.getElementById("CurrentWifiTxt").innerHTML='Connection mode :' + WifiMode + ' SSID '+ConnectedSSID + ' ' + SwitchMode;
+        
+
+        if (data.available_networks && data.available_networks.length >0) {
+            let sortedNetworks=data.available_networks.sort((a,b)=>{
+                return (b.known || 0)- (a.known || 0);
+            });
+            AvailableSSID="<table class=\"w3-table\">"
+            sortedNetworks.forEach(net=> {
+                let isCurrent=(net.ssid ===data.connected_ssid);
+                if (net.known==0) {
+                    btnText="<button class=\"w3-button w3-blue w3-round-large w3-hover-teal\" onClick=\"joinWifi('" + net.ssid + "')\" name=\"JoinButton\">Join</button>" ;}
+                else if (net.known==1) {
+                    btnText="<button class=\"w3-button w3-green w3-round-large w3-hover-teal\" onClick=\"connectWifi('" + net.ssid + "')\" name=\"ConnectButton\">Connect</button>" +
+                    "<button class=\"w3-button w3-red w3-round-large w3-hover-teal\" onClick=\"deleteWifi('" + net.ssid + "')\" name=\"deleteButton\">Remove</button>";} 
+                else {
+                    btnText="Unavailable" +
+                    " <button class=\"w3-button w3-red w3-round-large w3-hover-teal\" onClick=\"deleteWifi('" + net.ssid + "')\" name=\"deleteButton\">Remove</button>";}
+                if (isCurrent){
+                    btnText="Connected";    
+                    }
+                    console.log(btnText);   
+                AvailableSSID=AvailableSSID + "<tr><td>"+net.ssid + "</td><td>" +  btnText +'</td></tr>';
+            });
+                AvailableSSID=AvailableSSID+"</table>";
+            }
+            
+            document.getElementById("AvailableWifisTxt").innerHTML=AvailableSSID
+        }
+    }
+
+
+ </script>   
+</body>
