@@ -129,7 +129,43 @@ for (let i = -12; i <= 12; i++) {
 <p>
     <input type="button" class="w3-button w3-blue w3-round-xxlarge w3-hover-teal" onclick="saveConfig()" id="save" name="saveConfig" value="Save"> 
 </p>
+
+    <p>
+        <b>Battery:</b>
+        <img id="BatteryIcon"
+             src="img/battery6.svg"
+             width="32"
+             style="vertical-align:middle;">
+
+        <span id="BatteryVoltage"></span>
+    </p>
+   <p id="RechargeWarning"></p>
 <script>
+
+
+function getBatteryIcon(voltage, power_state) {
+
+    // charging
+    if (power_state == 0) {
+        return "img/battery_chg.svg";
+    }
+
+    // full
+    if (power_state == 1) {
+        return "img/battery_full.svg";
+    }
+
+    if (voltage >= 4.12) return "img/battery_full.svg";
+    if (voltage >= 4.05) return "img/battery6.svg";
+    if (voltage >= 3.95) return "img/battery5.svg";
+    if (voltage >= 3.85) return "img/battery4.svg";
+    if (voltage >= 3.75) return "img/battery3.svg";
+    if (voltage >= 3.65) return "img/battery2.svg";
+    if (voltage >= 3.50) return "img/battery1.svg";
+
+    return "img/battery_empty.png";
+}
+
 
 async function factoryReset() {
 
@@ -219,8 +255,35 @@ async function getConfig(){
         }
         toggleTimeZone();
         
-
-        
+        let power_state=data.powerstate;    
+        let recharge_info='';
+        let power_info='';
+        if (Math.round(data.Voltage*10)/10 <3.3) {
+                recharge_info="<div class=\"w3-container w3-red\">BATTERY LOW, RECHARGE !</div>";
+            }
+            else {
+                recharge_info="";
+            }
+        if (power_state==0) {
+                power_info="Battery charging";
+            }
+            else if (power_state==1) {
+                power_info="Battery full";
+            }
+            else if (power_state==2) {
+                power_info="On battery power";
+            }
+            else {
+                power_info="Error reading power state"
+            }
+        document.getElementById("BatteryVoltage").innerText = Math.round(data.voltage * 10) / 10 + "V";
+        document.getElementById("BatteryIcon").src = getBatteryIcon(data.voltage, power_state);
+        if (Math.round(data.Voltage * 10) / 10 < 3.3) {
+               document.getElementById("RechargeWarning").innerHTML = "<div class=\"w3-container w3-red\">BATTERY LOW, RECHARGE!</div>";
+            }
+        else {
+             document.getElementById("RechargeWarning").innerHTML = "";
+            }
     }
 }
 </script>

@@ -11,7 +11,7 @@ import qwiic_rv8803
 import sys
 import time
 import ntptime
-from machine import RTC,Pin,PWM
+from machine import RTC,Pin,PWM,ADC
 import sh1106
 from writer import Writer
 import clock36
@@ -46,7 +46,7 @@ GPIO_I2C_SCL      = 5
 #
 GPIO_ROTARY_CLK   = 13
 GPIO_ROTARY_DT    = 14
-GPIO_KNOB         = 16 # Changed to 15 on the PCB
+GPIO_KNOB         = 15 # Changed to 15 on the PCB, 16 on breadboard
 #
 # ------------------------------------------------------------
 # USER BUTTONS
@@ -61,13 +61,13 @@ GPIO_BUTTON3      = 19
 # ------------------------------------------------------------
 #
 GPIO_AMP_PWM      = 0
-GPIO_AMP_SD       = 21 #Changed to 1 on the PCB
+GPIO_AMP_SD       = 1 #Changed to 1 on the PCB, 21 on breadboard
 #d
 # ------------------------------------------------------------
 # LEDS
 # ------------------------------------------------------------
 #
-GPIO_LED1         = 1 #Top, change to 6 on PCB
+GPIO_LED1         = 6 #Top, change to 6 on PCB, 1 on breadboard
 GPIO_LED2_PWM     = 2 #White
 GPIO_LED3_PWM     = 3 #Yellow
 #
@@ -76,8 +76,8 @@ GPIO_LED3_PWM     = 3 #Yellow
 # ------------------------------------------------------------
 # Two digital inputs used to determine the power supply state.
 #
-GPIO_POWER_1      = 6 #Change to 20 on PCB
-GPIO_POWER_2      = 7 #Change to 21 on PCB
+GPIO_POWER_1      = 21 #Change to 21 on PCB, 6 on breadboard
+GPIO_POWER_2      = 20 #Change to 20 on PCB, 7 on breadboard
 #
 # ------------------------------------------------------------
 # BATTERY VOLTAGE
@@ -109,6 +109,7 @@ GPIO_ALARM_SW=22
 
 
 # Global variables and objects
+FW_VERSION="0.2.2"
 i2c = MicroPythonI2C(sda=GPIO_I2C_SDA, scl=GPIO_I2C_SCL)
 wifi_timeout_ms=180000
 wifi_timeout=time.ticks_add(time.ticks_ms(),wifi_timeout_ms)
@@ -137,6 +138,8 @@ ALARM_STATE=0 # Possible values: 0=waiting, 1=Alarm raised, 2=Snooze in progress
 SUNRISE_STATE=0 #Possible values 0-5 to indikate the brightness of the lights
 SUNRISE_CANCELLED=False # Switched to true if user cancels sunrise effect during sunrise
 SNOOZE_UNTIL=0 # Time to snooze until if user so chooses
+SUNRISE_FORCE=False # User can toggle this with button 2 when on the clock screen
+AUDIO_VOLUME = 5  # Volume 0–100 %
 default_config = {
     "timezone": 2,
     "timezone_info":"",
@@ -158,7 +161,7 @@ myRTC = qwiic_rv8803.QwiicRV8803(i2c_driver=i2c)
 pico_RTC=RTC()
 
 #Scheduler run times
-ntp_sync_time=239 # 03:39 local time
+ntp_sync_time=241 # 04:01 local time
 
 # Create OLED display
 oled = sh1106.SH1106_I2C(
@@ -280,6 +283,9 @@ trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING,
 led2_pwm = PWM(Pin(GPIO_LED2_PWM))
 led2_pwm.freq(1000)
 led2_pwm.duty_u16(0)
+led3_pwm=PWM(Pin(GPIO_LED3_PWM))
+led3_pwm.freq(1000)
+led3_pwm.duty_u16(0)
 
 #Create TOP Led
 led1_pwm = PWM(Pin(GPIO_LED1))
@@ -292,6 +298,11 @@ amp_sd = Pin(GPIO_AMP_SD, Pin.OUT, value=0)
 
 amp_pwm = PWM(Pin(GPIO_AMP_PWM))
 amp_pwm.duty_u16(0)
+
+#Create Power monitoring pins
+chrg_pin=Pin(GPIO_POWER_1,Pin.IN,Pin.PULL_UP)
+stdby_pin=Pin(GPIO_POWER_2,Pin.IN,Pin.PULL_UP)
+battery=ADC(GPIO_BATTERY_ADC)
 #BEGIN PROGRAM CODE
 
 
@@ -318,6 +329,7 @@ async def alarm_audio():
     amp_sd.value(0)
 
 async def audio_task():
+    global AUDIO_VOLUME
     audio_on = False
 
     while True:
@@ -329,7 +341,12 @@ async def audio_task():
                 amp_pwm.freq(1000)
                 audio_on = True
 
-            amp_pwm.duty_u16(32768)
+#            amp_pwm.duty_u16(32768)
+            # Äänenvoimakkuus 0–100 %
+            volume = max(0, min(100, AUDIO_VOLUME))
+            duty = int(32768 * volume / 100)
+            amp_pwm.duty_u16(duty)
+#            amp_pwm.duty_u16(int(65535 * AUDIO_VOLUME / 100))
             await asyncio.sleep_ms(300)
 
             amp_pwm.duty_u16(0)
@@ -364,7 +381,7 @@ async def set_led1(state):
     led1_pwm.duty_u16(target)
 
 async def set_led2_brightness(level):
-    brightness = [0, 2, 5, 10, 25, 50]
+    brightness = [0, 5, 10, 33, 50, 75]
 
     if level < 0:
         level = 0
@@ -384,6 +401,28 @@ async def set_led2_brightness(level):
         await asyncio.sleep_ms(100)
 
     led2_pwm.duty_u16(target)
+
+async def set_led3_brightness(level):
+    brightness = [0, 10, 33, 50, 75, 100]
+
+    if level < 0:
+        level = 0
+    elif level > 5:
+        level = 5
+
+    target = int(brightness[level] * 65535 / 100)
+    current = led3_pwm.duty_u16()
+
+    # Fade over 1.8 seconds
+    steps = 18
+    step = (target - current) / steps
+
+    for i in range(steps):
+        current += step
+        led3_pwm.duty_u16(int(current))
+        await asyncio.sleep_ms(100)
+
+    led3_pwm.duty_u16(target)
 
 async def check_ntp(force=False):
 
@@ -485,11 +524,44 @@ async def write_network_config(wificonfig, filename="wifi_config.json"):
     except Exception as e:
         print("Error saving config:", e)
 
-async def getclockconfig(request,response):
+async def getclockconfig(request, response):
     global config
     print("GetClockConfig started")
-    await response.send_json(json.dumps(config),200)
+
+    local_config = config.copy()
+    local_config["voltage"] = await readBatVoltage()
+    local_config["powerstate"] = await check_powerstate()
+
+    print("Local Config:",local_config)
+    await response.send_json(json.dumps(local_config), 200)
     await extend_wifi_timeout()
+
+async def check_powerstate():
+    global chrg_pin,stdby_pin
+    chrg=chrg_pin.value()
+    stdby=stdby_pin.value()
+    
+    if chrg==0 and stdby==1:
+        return 0 #Charging, on mains power
+    if chrg==1 and stdby==0:
+        return 1 #Battery Full, on mains power
+    if chrg==1 and stdby==1:
+        return 2 #On battery power, discharging
+    else:
+        return -1 #Error state, should not happen
+
+async def readBatVoltage():
+    global battery
+    
+    #Check the battery voltage
+    raw_voltage=battery.read_u16()
+    conversion_factor=3.3*2/65535 # Voltage divider splits the volts in half.
+    voltage=raw_voltage*conversion_factor*1.018 #To account for losses in measurement
+    if voltage>4.3: #This situation may happen, if the power switch is off and the Pico is powered from its own USB
+        voltage=3.2 #We indicate the need to recharge, this is for debugging.
+ 
+#     print("Voltage:" , voltage)        
+    return voltage
 
 async def factoryreset(request,response):
     global ui_state
@@ -787,6 +859,14 @@ def get_alarm_indicator():
         return "A"
     return " "
 
+async def get_battery_indicator():
+    if await check_powerstate()==1:
+        return "       "
+    if await readBatVoltage() <3.3:
+        return "BAT LOW"
+    return "       "
+        
+
 def Time2Minutes(hour=None, minute=None):
     if hour is None and minute is None:
         _, _, _, _, hour, minute, _, _ = pico_RTC.datetime()
@@ -1020,7 +1100,7 @@ async def oled_setup_date(wizardmode=False):
     knob_pressed = False
     button1_pressed=False
     button3_pressed=False
-
+    last_action=time.ticks_ms()
     now = machine.RTC().datetime()
 
     setup_day = now[2]
@@ -1050,6 +1130,7 @@ async def oled_setup_date(wizardmode=False):
             return
         if value != last_value:
             last_value = value
+            last_action=time.ticks_ms()
             setup_day = value
             oled.fill(0)
             oled.text("Setup date", 0, 0)
@@ -1069,7 +1150,9 @@ async def oled_setup_date(wizardmode=False):
             else:
                 oled.text("Knob to proceed", 0, 50)
             oled.show()
-
+        if time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(20)
 
     knob_pressed = False
@@ -1096,6 +1179,7 @@ async def oled_setup_date(wizardmode=False):
             return
         if value != last_value:
             last_value = value
+            last_action=time.ticks_ms()
             setup_month = value
 
             oled.fill(0)
@@ -1116,7 +1200,9 @@ async def oled_setup_date(wizardmode=False):
             else:
                 oled.text("Knob to proceed", 0, 50)
             oled.show()
-
+        if time.ticks_diff(time.ticks_ms,last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(20)
 
     knob_pressed = False
@@ -1145,6 +1231,7 @@ async def oled_setup_date(wizardmode=False):
         if value != last_value:
             last_value = value
             setup_year = value
+            last_action=time.ticks_ms()
 
             oled.fill(0)
             oled.text("Setup date", 0, 0)
@@ -1164,7 +1251,9 @@ async def oled_setup_date(wizardmode=False):
             else:
                 oled.text("Knob to proceed", 0, 50)
             oled.show()
-
+        if time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(20)
 
     knob_pressed = False
@@ -1234,7 +1323,7 @@ async def oled_set_tz(wizardmode=False):
     button1_pressed=False
     button3_pressed=False
     knob_pressed = False
-
+    last_action=time.ticks_ms()
     if wizardmode:
         setup_timezone = 0
     else:
@@ -1260,6 +1349,7 @@ async def oled_set_tz(wizardmode=False):
         if value != last_value:
 
             last_value = value
+            last_action=time.ticks_ms()
             setup_timezone = value
 
             oled.fill(0)
@@ -1276,7 +1366,9 @@ async def oled_set_tz(wizardmode=False):
             else:
                 oled.text("Knob to proceed", 0, 50)
             oled.show()
-
+        if not wizardmode and time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(20)
 
     knob_pressed = False
@@ -1301,6 +1393,7 @@ async def oled_set_time(wizardmode=False):
     button3_pressed=False
     setup_hour=0
     setup_minute=0
+    last_action=time.ticks_ms()
     if not wizardmode:
         now = machine.RTC().datetime()
         setup_hour=now[4]
@@ -1323,6 +1416,7 @@ async def oled_set_time(wizardmode=False):
         # Update display only when something changed
         if value != last_value :
             last_value = value
+            last_action=time.ticks_ms()
             setup_hour = value
             oled.fill(0)
             oled.text("Setup local time", 0, 0)
@@ -1343,7 +1437,9 @@ async def oled_set_time(wizardmode=False):
             else:
                 oled.text("Knob to proceed", 0, 50)
             oled.show()
-
+        if not wizardmode and time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(20)
 
     knob_pressed = False
@@ -1365,7 +1461,7 @@ async def oled_set_time(wizardmode=False):
                 return
 
         if value != last_value:
-
+            last_action=time.ticks_ms()
             last_value = value
             setup_minute = value
 
@@ -1390,7 +1486,9 @@ async def oled_set_time(wizardmode=False):
             else:
                 oled.text("Knob to proceed", 0, 50)
             oled.show()
-
+        if not wizardmode and time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(20)
 
     knob_pressed = False
@@ -1494,7 +1592,7 @@ async def oled_display_network(LocalRequest=False):
         
 
 async def oled_display_clock():
-    global oled,pico_RTC,ui_state,button1_pressed,button2_pressed,knob_pressed,SUNRISE_STATE,SUNRISE_CANCELLED,ALARM_STATE,SNOOZE_UNTIL
+    global oled,pico_RTC,ui_state,button1_pressed,button2_pressed,knob_pressed,SUNRISE_STATE,SUNRISE_CANCELLED,ALARM_STATE,SNOOZE_UNTIL,SUNRISE_FORCE
     
     wri = Writer(oled, clock36,False)
     while ui_state=="clock":
@@ -1506,6 +1604,10 @@ async def oled_display_clock():
             if button2_pressed:
                 button2_pressed=False
                 SUNRISE_CANCELLED=True
+                SUNRISE_FORCE=False
+        if button2_pressed: # Check if user wants to force sunrise on
+            button2_pressed=False
+            SUNRISE_FORCE=True
         if ALARM_STATE==1: #Check for snooze
             if knob_pressed:
                 knob_pressed=False
@@ -1514,9 +1616,11 @@ async def oled_display_clock():
                     SNOOZE_UNTIL -= 1440 #Handle next day scenario
                 ALARM_STATE=2
         year, month, day, weekday, hour, minute, second, _ = pico_RTC.datetime()
+        battery_indicator=await get_battery_indicator()
         oled.fill(0)
         alarm_indicator = get_alarm_indicator()
         oled.text(alarm_indicator, 120, 0)
+        oled.text(battery_indicator,0,0)
         daterow=str(day)+"."+str(month)+"."+str(year)
         separator = ":" if second % 2 == 0 else " "
         clockrow = f"{hour:02d}{separator}{minute:02d}"
@@ -1737,6 +1841,7 @@ async def oled_display_get_time(mode):
                 button1_pressed=False
                 return -1
             else:
+                button1_pressed=False
                 return Preset1
         if button2_pressed and mode==4:
             button2_pressed=False
@@ -1828,11 +1933,13 @@ async def oled_display_menu_clock2():
     knob_pressed=False
     setup_rotary(1,1,4,False)
     last_value=None
+    last_action=time.ticks_ms()
     print ("Menu clock 2")
     while ui_state=="menu_clock2":
         value=rotary.value()
         if value!=last_value:
             last_value=value
+            last_action=time.ticks_ms()
             cursor1="  "
             cursor2="  "
             cursor3="  "
@@ -1893,6 +2000,9 @@ async def oled_display_menu_clock2():
             if value==4:               
                 ui_state="menu_clock"
                 return        
+        if time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(10)            
         
         
@@ -1906,11 +2016,12 @@ async def oled_display_menu_clock():
     knob_pressed=False
     setup_rotary(1, 1, 4, False)
     last_value=None
-    
+    last_action=time.ticks_ms()
     while ui_state=="menu_clock":
         value=rotary.value()
         if value !=last_value:
             last_value=value
+            last_action=time.ticks_ms()
             cursor1 = "  "
             cursor2 = "  "
             cursor3 = "  "
@@ -1944,7 +2055,7 @@ async def oled_display_menu_clock():
             return
         if knob_pressed:
             knob_pressed=False
-            print("KNob pressed ",value)
+            print("Knob pressed ",value)
             if value==1:
                await oled_set_time(False)
                return
@@ -1957,6 +2068,9 @@ async def oled_display_menu_clock():
             if value==4:               
                 ui_state="menu_clock2"
                 return
+        if time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(10)    
 
 async def oled_display_menu_presets():
@@ -1967,10 +2081,11 @@ async def oled_display_menu_presets():
     knob_pressed=False
     setup_rotary(1, 1, 3, False)
     last_value=None
-    
+    last_action=time.ticks_ms()
     while ui_state=="menu_presets":
         value=rotary.value()
         if value !=last_value:
+            last_action=time.ticks_ms()
             last_value=value
             cursor1 = "  "
             cursor2 = "  "
@@ -2030,7 +2145,9 @@ async def oled_display_menu_presets():
                 save_config(config)
                 return
                 
-        
+        if time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return
         await asyncio.sleep_ms(10)
 
 async def oled_choose_wifi():
@@ -2040,6 +2157,7 @@ async def oled_choose_wifi():
     button1_pressed = False
     button3_pressed = False
     knob_pressed = False
+    last_action=time.ticks_ms()
     # Read known networks from config
     config = read_network_config()
     known_ssids = [
@@ -2072,6 +2190,8 @@ async def oled_choose_wifi():
         oled.show()
 
         while not button1_pressed and not button3_pressed:
+            if time.ticks_diff(time.ticks_ms(),last_action)>10000:
+                button1_pressed=True
             await asyncio.sleep_ms(20)
 
         if button1_pressed:
@@ -2092,6 +2212,7 @@ async def oled_choose_wifi():
         index = rotary.value()
 
         if index != last_index:
+            last_action=time.ticks_ms()
             last_index = index
 
             oled.fill(0)
@@ -2145,7 +2266,9 @@ async def oled_choose_wifi():
             knob_pressed = False
 
             
-
+        if time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            return -1
         await asyncio.sleep_ms(10)
     knob_pressed=False
     selected_ssid = available_ssids[index]
@@ -2285,17 +2408,19 @@ async def oled_display_menu():
     global oled, ui_state, button1_pressed,button3_pressed, rotary, knob_pressed
 
     button1_pressed = False
+    button2_pressed=False
     button3_pressed=False
     knob_pressed=False
     setup_rotary(1, 1, 4, False)
     print("Menu entered")
     last_value = None
-
+    last_action=time.ticks_ms()
     while ui_state == "menu":
 
         value = rotary.value()
 
         if value != last_value:
+            last_action=time.ticks_ms()
             last_value = value
 
             cursor1 = "  "
@@ -2344,15 +2469,20 @@ async def oled_display_menu():
                 knob_pressed=False
                 ui_state="factory_reset"
                 return
-
+        if time.ticks_diff(time.ticks_ms(),last_action)>10000:
+            ui_state="clock"
+            print("Timeout")
+            return
         await asyncio.sleep_ms(10)
 
 def oled_booting():
     global oled
+    firmware="Firmware "+ FW_VERSION
     oled.fill(0)
     oled.text("Please wait !",0,0)
     oled.text("The clock is",0,20)
     oled.text("starting up",0,30)
+    oled.text(firmware,0,50)
     oled.show()
     
 def oled_connecting_wifi():
@@ -2452,12 +2582,20 @@ async def check_alarm():
             print("Raise Snooze Alarm")
     
 async def check_sunrise():
-    global TIME_ALARM, SUNRISE_STATE, SUNRISE_CANCELLED,ALARM_STATE
+    global TIME_ALARM, SUNRISE_STATE, SUNRISE_CANCELLED,ALARM_STATE,SUNRISE_FORCE
 
+    # If sunrise is forced, the set it and exit
+    if SUNRISE_FORCE:
+        SUNRISE_STATE=5
+        await set_led2_brightness(SUNRISE_STATE)
+        await set_led3_brightness(SUNRISE_STATE)
+        return
+    
     # Alarm is not active
     if alarm_switch.value() == 1:
         SUNRISE_STATE = 0
         await set_led2_brightness(SUNRISE_STATE)
+        await set_led3_brightness(SUNRISE_STATE)
         return
 
     now = Time2Minutes()
@@ -2466,6 +2604,7 @@ async def check_sunrise():
     if sunrise_time == 0:
         SUNRISE_STATE = 0
         await set_led2_brightness(SUNRISE_STATE)
+        await set_led3_brightness(SUNRISE_STATE)
         return
 
     # How many minutes until the alarm?
@@ -2500,6 +2639,7 @@ async def check_sunrise():
 
     print("SUNRISE_STATE =", SUNRISE_STATE)
     await set_led2_brightness(SUNRISE_STATE)
+    await set_led3_brightness(SUNRISE_STATE)
 
 async def scheduler_task():
 

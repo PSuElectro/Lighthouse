@@ -1,0 +1,16 @@
+Lighthouse project changelog
+
+***********************
+Sat Oct 24 2026 Version 0.2.2
+Version 0.2.2
+- Changed GPIO assignments to match the PCB
+- Added timeouts for menus
+- Added yellow led handling
+- changed NTP sync time to 04:01 localtime
+- Added battery state monitoring functionality
+- Added firmware version number to application
+- Added possibility to force the sunrise lights on
+- Added preliminary sound capability (loud beep)
+
+***********************
+Fri Oct 16 2026 Initial commit
