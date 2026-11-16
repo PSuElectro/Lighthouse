@@ -113,6 +113,13 @@ for (let i = -12; i <= 12; i++) {
     <td><input class="w3-input" type="time" id="Preset3"></td>
 </tr>
 <tr>
+    <td><label>Alarm sound</label></td>
+    <td><select id="alarmsound">
+        <option value="0">Beep</option>
+        <option value="1">Waves and seaguls</option>
+    </select></td>
+</tr>
+<tr>
     <td>Sync timezone from internet</td>
     <td>
     <label class="switch">
@@ -205,12 +212,14 @@ async function saveConfig() {
     const preset1 = timeToMinutes(document.getElementById("Preset1").value);
     const preset2 = timeToMinutes(document.getElementById("Preset2").value);
     const preset3 = timeToMinutes(document.getElementById("Preset3").value);
+    const alarmsound=document.getElementById("alarmsound").value;
     const cTime= Math.round(Date.now()/1000);
     let tzsync=0;
     if (document.getElementById("tzSync").checked) {
         tzsync=1;
     }
-    poststr=poststr+tz+"/"+snooze+"/"+sunrise+"/"+preset1+"/"+preset2+"/"+preset3+"/"+tzsync+"/"+cTime;
+    poststr=poststr+tz+"/"+snooze+"/"+sunrise+"/"+preset1+"/"+preset2+"/"+preset3+"/"+tzsync+"/"+cTime+"/"+alarmsound;
+    console.log(poststr);
     const response=await fetch(poststr); 
     if (response.ok) {
         button.disabled=false;
@@ -247,6 +256,7 @@ async function getConfig(){
         timeMM=data.preset3-timeHH*60;
         timePreset=zeroPad(timeHH,2)+":"+zeroPad(timeMM,2);
         document.getElementById("Preset3").value=timePreset;
+        document.getElementById("alarmsound").value=data.alarmsound;
         if (data.tzsync==0) {
             document.getElementById("tzSync").checked=false;
         }
@@ -279,7 +289,7 @@ async function getConfig(){
         document.getElementById("BatteryVoltage").innerText = Math.round(data.voltage * 10) / 10 + "V";
         document.getElementById("BatteryIcon").src = getBatteryIcon(data.voltage, power_state);
         if (Math.round(data.Voltage * 10) / 10 < 3.3) {
-               document.getElementById("RechargeWarning").innerHTML = "<div class=\"w3-container w3-red\">BATTERY LOW, RECHARGE!</div>";
+               document.getElementById("RechargeWarning").innerHTML = recharge_info;
             }
         else {
              document.getElementById("RechargeWarning").innerHTML = "";

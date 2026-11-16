@@ -1,6 +1,15 @@
 Lighthouse project changelog
 
 ***********************
+
+Version 1.0.0
+- Implemented audio player functionality and created audiofile
+- Implemented power saving functions for battery power
+- Implemented UI elements to choose what audio to play as alarm
+- Fixed a bug with the DST change.
+- Tweaked Gurgleapps webserver to better handle wifi startup
+
+***********************
 Sat Oct 24 2026 Version 0.2.2
 Version 0.2.2
 - Changed GPIO assignments to match the PCB

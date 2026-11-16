@@ -39,6 +39,7 @@ class GurgleAppsWebserver:
         self.wlan_ap = network.WLAN(network.AP_IF)
         self.wlan_sta.config(hostname=self.hostname)
         self.enable_cors = False
+        self.connecting = False
         self.html = """<!DOCTYPE html>
         <html>
             <head> <title>GurgleApps.com Webserver</title> </head>
@@ -68,6 +69,13 @@ class GurgleAppsWebserver:
         return networks
 
     async def connect_wifi(self, ssid, password):
+        
+        if self.connecting:
+            print("Wi-Fi connection already in progress.")
+            return False
+
+        self.connecting = True
+        
         try:
             self.wifi_ssid = ssid
             self.wifi_password = password
@@ -102,6 +110,8 @@ class GurgleAppsWebserver:
         except OSError as e:
             print(f"Error connecting to Wi-Fi: {e}")
             return False
+        finally:
+            self.connecting = False
         
     def is_wifi_connected(self):
         return self.wlan_sta.isconnected()

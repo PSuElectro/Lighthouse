@@ -22,6 +22,7 @@ from ntp import get_ntp_time
 import socket #debug reason
 from timezone import get_timezone
 from rotary_irq_rp2 import RotaryIRQ
+from audio_player import AudioPlayer
 
 # ============================================================
 # GPIO PIN ASSIGNMENT
@@ -109,7 +110,7 @@ GPIO_ALARM_SW=22
 
 
 # Global variables and objects
-FW_VERSION="0.2.2"
+FW_VERSION="1.0.0"
 i2c = MicroPythonI2C(sda=GPIO_I2C_SDA, scl=GPIO_I2C_SCL)
 wifi_timeout_ms=180000
 wifi_timeout=time.ticks_add(time.ticks_ms(),wifi_timeout_ms)
@@ -149,7 +150,8 @@ default_config = {
     "preset2": 450,
     "preset3": 540,
     "tzsync":0,
-    "alarmtime":420
+    "alarmtime":420,
+    "alarmsound":0 # 0=beep, 1=raw soundfile
 }
 
 
@@ -213,7 +215,7 @@ def button1_handler(pin):
         return
 
     last_button1_press = now
-    print("button1 pressed")
+    print("button1 pressed "+str(time.ticks_ms()))
     button1_pressed = True
     
 button1 = Pin(GPIO_BUTTON1, Pin.IN, Pin.PULL_UP)
@@ -231,7 +233,7 @@ def button2_handler(pin):
         return
 
     last_button2_press = now
-    print("button2 pressed")
+    print("button2 pressed"+str(time.ticks_ms()))
     button2_pressed = True
     
 button2 = Pin(GPIO_BUTTON2, Pin.IN, Pin.PULL_UP)
@@ -249,7 +251,7 @@ def button3_handler(pin):
         return
 
     last_button3_press = now
-    print("button3 pressed")
+    print("button3 pressed"+str(time.ticks_ms()))
     button3_pressed = True
     
 button3 = Pin(GPIO_BUTTON3, Pin.IN, Pin.PULL_UP)
@@ -293,11 +295,19 @@ led1_pwm.freq(1000)
 led1_pwm.duty_u16(0)
 
 
-#Create Audio Pins
-amp_sd = Pin(GPIO_AMP_SD, Pin.OUT, value=0)
+# Create Audio Player
+audio_player = AudioPlayer(
+    audio_pin=GPIO_AMP_PWM,
+    amp_enable_pin=GPIO_AMP_SD,
+    default_file="lighthouse_sound.raw",
+    sample_rate=22050,
+    pwm_carrier_hz=20000,
+    volume=0.55,
+    block_samples=8192,
+    amp_start_delay_ms=20
+)
 
-amp_pwm = PWM(Pin(GPIO_AMP_PWM))
-amp_pwm.duty_u16(0)
+
 
 #Create Power monitoring pins
 chrg_pin=Pin(GPIO_POWER_1,Pin.IN,Pin.PULL_UP)
@@ -306,60 +316,35 @@ battery=ADC(GPIO_BATTERY_ADC)
 #BEGIN PROGRAM CODE
 
 
-async def alarm_audio():
-    # Amplifier on
-    amp_sd.value(1)
-
-    # Beep frequency
-    amp_pwm.freq(1000)
-
-    # Piip-piip-piip
-    for _ in range(3):
-        amp_pwm.duty_u16(32768)      # 50 % duty
-        print("Alarm Piip")
-        await asyncio.sleep_ms(1000)
-        
-        amp_pwm.duty_u16(0)
-        await asyncio.sleep_ms(200)
-
-    # Make sure audio is off
-    amp_pwm.duty_u16(0)
-
-    # Amplifier off
-    amp_sd.value(0)
-
 async def audio_task():
-    global AUDIO_VOLUME
-    audio_on = False
-
     while True:
-
         if ALARM_STATE == 1:
+            # Start alarm sound if not already playing
+            if not audio_player.is_playing():
+                try:
+                    if int(config.get("alarmsound", 0)) == 0:
 
-            if not audio_on:
-                amp_sd.value(1)
-                amp_pwm.freq(1000)
-                audio_on = True
-
-#            amp_pwm.duty_u16(32768)
-            # Äänenvoimakkuus 0–100 %
-            volume = max(0, min(100, AUDIO_VOLUME))
-            duty = int(32768 * volume / 100)
-            amp_pwm.duty_u16(duty)
-#            amp_pwm.duty_u16(int(65535 * AUDIO_VOLUME / 100))
-            await asyncio.sleep_ms(300)
-
-            amp_pwm.duty_u16(0)
-            await asyncio.sleep_ms(200)
-
+                        # Traditional beep
+                        audio_player.play_beep(
+                            frequency=1000,
+                            on_ms=300,
+                            off_ms=300,
+                            loop=True
+                        )
+                    else:
+                        # Lighthouse ambient sound
+                        audio_player.play(
+                            "lighthouse_sound.raw",
+                            loop=True
+                        )
+                except Exception as e:
+                    print("Audio start error:", e)
         else:
+            # Stop audio when alarm is no longer active
+            if audio_player.is_playing():
+                audio_player.stop()
+        await asyncio.sleep_ms(100)
 
-            if audio_on:
-                amp_pwm.duty_u16(0)
-                amp_sd.value(0)
-                audio_on = False
-
-            await asyncio.sleep_ms(20)
 
 async def set_led1(state):
     if state == 1:
@@ -383,7 +368,7 @@ async def set_led1(state):
 async def set_led2_brightness(level):
     brightness = [0, 5, 10, 33, 50, 75]
 
-    if level < 0:
+    if level < 3:
         level = 0
     elif level > 5:
         level = 5
@@ -442,11 +427,11 @@ async def check_ntp(force=False):
     last_ntp_sync = now
 
     try:
+        await enable_wifi() #In case we are in powersave mode
         sync_ntp()
-        await RTC2Local()
-
         if config["tzsync"] == 1:
             sync_timezone()
+        await RTC2Local()
 
     except Exception as e:
         print("NTP sync failed:", e)
@@ -796,7 +781,7 @@ async def rename_ap(request,response,apname):
     return
 
 
-def load_config(config_file="config.json"):
+async def load_config(config_file="config.json"):
     #Config is stored in a global variable, this function should only be called in the beginning of the main function
     global config,myRTC,TIME_ALARM
     try:
@@ -875,7 +860,7 @@ def Time2Minutes(hour=None, minute=None):
 
     return hour * 60 + minute
 
-async def saveclockconfig(request,response,TimeZone,snooze,sunrise,preset1,preset2,preset3,tzsync,utc_time):
+async def saveclockconfig(request,response,TimeZone,snooze,sunrise,preset1,preset2,preset3,tzsync,utc_time,alarmsound):
     global config,myRTC
     
     config["timezone"]=int(TimeZone)*4
@@ -885,6 +870,7 @@ async def saveclockconfig(request,response,TimeZone,snooze,sunrise,preset1,prese
     config["preset2"]=preset2
     config["preset3"]=preset3
     config["tzsync"]=tzsync
+    config["alarmsound"]=alarmsound
     UTC_Time=time.gmtime(int(utc_time))
     print("saveclock utc time:")
     print(UTC_Time)
@@ -905,6 +891,7 @@ async def saveclockconfig(request,response,TimeZone,snooze,sunrise,preset1,prese
     await RTC2Local()
     save_config(config)
     response_string={"Result":0}
+    await extend_wifi_timeout()
     await response.send_json(json.dumps(response_string),200)
     
 async def savewizard(request,response,TimeZone,snooze,sunrise,utc_time):
@@ -1661,6 +1648,11 @@ async def oled_display_get_on_off(mode):
             in_value=1
         else:
             in_value=0
+    elif mode==4:
+        Title="Alarm sound"
+        on_value="Waves & Seagulls"
+        off_value="Beep"
+        in_value=int(config["alarmsound"])
     setup_rotary(in_value,0,1,False)
     wri = Writer(oled, clock36,False)
     last_index=None
@@ -1670,12 +1662,20 @@ async def oled_display_get_on_off(mode):
             last_index=index
             oled.fill(0)
             oled.text(Title, 0, 0)
-            x = (128 - wri.stringlen(on_value)) // 2
-            wri.setpos(10, x)            
-            if index==0:
-                wri.printstring(off_value, invert=True)
+            if mode==4:
+                value = off_value if index == 0 else on_value
+                x = (128 - len(value) * 8) // 2
+                w = len(value) * 8
+                oled.fill_rect(x - 2, 20, w + 4, 12, 1)
+                oled.text(value, x, 22, 0)    
             else:
-                wri.printstring(on_value, invert=True)
+                x = (128 - wri.stringlen(on_value)) // 2
+                wri.setpos(10, x)            
+                if index==0:
+                    wri.printstring(off_value, invert=True)
+                else:
+                    wri.printstring(on_value, invert=True)
+            
             oled.fill_rect(0, 54, 32, 9, 1)
             oled.text("EXIT", 0, 55, 0)
             oled.fill_rect(85, 54, 32, 9, 1)
@@ -1957,7 +1957,7 @@ async def oled_display_menu_clock2():
             oled.text(cursor1 + "Set Snooze", 0, 10)
             oled.text(cursor2 + "Set Sunrise", 0, 20)
             oled.text(cursor3 + "Timezone sync", 0, 30)
-            oled.text(cursor4 + "Prev page", 0, 40)
+            oled.text(cursor4 + "Alarm Sound", 0, 40)
             oled.fill_rect(0, 54, 32, 9, 1)
             oled.text("EXIT", 0, 55, 0)
             oled.fill_rect(85, 54, 32, 9, 1)
@@ -1997,8 +1997,13 @@ async def oled_display_menu_clock2():
                    config["tzsync"]=selection
                    save_config(config)
                return
-            if value==4:               
-                ui_state="menu_clock"
+            if value==4:
+                selection = await oled_display_get_on_off(4)
+                ui_state = "menu_clock2"
+                if selection != -1:
+                    config["alarmsound"] = selection
+                    save_config(config) 
+#                 ui_state="menu_clock"
                 return        
         if time.ticks_diff(time.ticks_ms(),last_action)>10000:
             ui_state="clock"
@@ -2641,6 +2646,23 @@ async def check_sunrise():
     await set_led2_brightness(SUNRISE_STATE)
     await set_led3_brightness(SUNRISE_STATE)
 
+async def check_powersave():
+    global wifi_timeout
+    # Implement powersaving functions if necessary
+    # 1st check, if we are on mains power, this is not necessary
+    if check_powerstate()==0:
+        # Let's make sure, that the wifi is on
+        await enable_wifi()
+        return
+    
+    # 2nd check, if the Wifi timeout expired
+    if time.ticks_diff(time.ticks_ms(),wifi_timeout)<0:
+        return
+    
+    # Both checks failed, let's shutdown Wifi
+    await disable_wifi()
+        
+
 async def scheduler_task():
 
     await asyncio.sleep(30)
@@ -2653,20 +2675,29 @@ async def scheduler_task():
         await check_ntp()
         await check_sunrise()
         await check_alarm()
+        await check_powersave()
 
 
         await asyncio.sleep(2)
 
 async def main():
     global ui_state,WifiNetworks
+    # Initialize audio hardware
+    audio_player.init()
     oled_booting()
     WifiNetworks=await server.scan_networks(server)
     await setup_network_from_config(server)
     config,wifi=await deployment_check()
+    
+    await load_config()
+
+
+
+    # Start background tasks
     asyncio.create_task(scheduler_task())
     asyncio.create_task(alarm_switch_task())
     asyncio.create_task(audio_task())
-    await load_config()
+    
     while True:
         if ui_state=="clock":
             await oled_display_clock()
@@ -2707,7 +2738,7 @@ server.add_function_route("/change_ap_pw/<newpw>",change_ap_pw)
 server.add_function_route("/getnetconfig",getnetconfig)
 server.add_function_route("/changehostname/<newhostname>",changehostname)
 server.add_function_route("/getclockconfig",getclockconfig)
-server.add_function_route("/saveclockconfig/<TimeZone>/<snooze>/<sunrise>/<preset1>/<preset2>/<preset3>/<tzsync>/<utc_time>",saveclockconfig)
+server.add_function_route("/saveclockconfig/<TimeZone>/<snooze>/<sunrise>/<preset1>/<preset2>/<preset3>/<tzsync>/<utc_time>/<alarmsound>",saveclockconfig)
 server.add_function_route("/savewizard/<TimeZone>/<snooze>/<sunrise>/<utc_time>",savewizard)
 server.add_function_route("/getsetupstate",getsetupstate)
 server.add_function_route("/startsetup",startsetup)
