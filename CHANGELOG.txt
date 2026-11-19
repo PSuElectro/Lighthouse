@@ -1,7 +1,15 @@
 Lighthouse project changelog
 
 ***********************
+Thu Nov 19 2026
+Version 1.0.3
+- Fixed the Wifi shutdown bug #1
+- Dimmed the display when the alarm is on feature #3
+- Changed the sunrise effect to be more suttle #2
 
+
+***********************
+Mon Nov 16 2026
 Version 1.0.0
 - Implemented audio player functionality and created audiofile
 - Implemented power saving functions for battery power

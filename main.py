@@ -110,7 +110,7 @@ GPIO_ALARM_SW=22
 
 
 # Global variables and objects
-FW_VERSION="1.0.0"
+FW_VERSION="1.0.3"
 i2c = MicroPythonI2C(sda=GPIO_I2C_SDA, scl=GPIO_I2C_SCL)
 wifi_timeout_ms=180000
 wifi_timeout=time.ticks_add(time.ticks_ms(),wifi_timeout_ms)
@@ -141,6 +141,7 @@ SUNRISE_CANCELLED=False # Switched to true if user cancels sunrise effect during
 SNOOZE_UNTIL=0 # Time to snooze until if user so chooses
 SUNRISE_FORCE=False # User can toggle this with button 2 when on the clock screen
 AUDIO_VOLUME = 5  # Volume 0–100 %
+WIFI_OFF=False
 default_config = {
     "timezone": 2,
     "timezone_info":"",
@@ -366,9 +367,9 @@ async def set_led1(state):
     led1_pwm.duty_u16(target)
 
 async def set_led2_brightness(level):
-    brightness = [0, 5, 10, 33, 50, 75]
+    brightness = [0, 5, 10, 20, 33, 75]
 
-    if level < 3:
+    if level < 4:
         level = 0
     elif level > 5:
         level = 5
@@ -388,7 +389,7 @@ async def set_led2_brightness(level):
     led2_pwm.duty_u16(target)
 
 async def set_led3_brightness(level):
-    brightness = [0, 10, 33, 50, 75, 100]
+    brightness = [0, 10, 33, 80, 100, 100]
 
     if level < 0:
         level = 0
@@ -411,7 +412,7 @@ async def set_led3_brightness(level):
 
 async def check_ntp(force=False):
 
-    global last_ntp_sync
+    global last_ntp_sync,WIFI_OFF
 
     now = time.time()
 
@@ -432,6 +433,9 @@ async def check_ntp(force=False):
         if config["tzsync"] == 1:
             sync_timezone()
         await RTC2Local()
+        if WIFI_OFF:
+            # Wifi was off deliberatly, we'll turn it off again
+            await disable_wifi()
 
     except Exception as e:
         print("NTP sync failed:", e)
@@ -2288,7 +2292,7 @@ async def oled_choose_wifi():
     
 
 async def oled_display_menu_net():
-    global oled, ui_state,button1_pressed,button3_pressed,rotary,knob_pressed
+    global oled, ui_state,button1_pressed,button3_pressed,rotary,knob_pressed,WIFI_OFF
     
     button1_pressed=False
     button3_pressed=False
@@ -2361,10 +2365,12 @@ async def oled_display_menu_net():
                 if selection!=-1:
                     if selection==0:
                         await disable_wifi()
+                        WIFI_OFF=True
                         await oled_display_network(True)
                     else:
                         oled_connecting_wifi()
                         await enable_wifi()
+                        WIFI_OFF=False
                         await oled_display_network(True)
                 last_value=None
                 setup_rotary(1,1,4,False)
@@ -2527,7 +2533,7 @@ async def deployment_check():
     return config,wifi
 
 async def handle_alarm_switch():
-    global alarm_switch, alarm_switch_changed,ui_state,TIME_ALARM,ALARM_STATE,SUNRISE_CANCELLED,SNOOZE_UNTIL
+    global alarm_switch, alarm_switch_changed,ui_state,TIME_ALARM,ALARM_STATE,SUNRISE_CANCELLED,SNOOZE_UNTIL,oled
     #Check if actions need to be taken based on the alarm swich change
     ALARM_STATE=0 #Always reset
     SUNRISE_CANCELLED=False #Always reset
@@ -2538,6 +2544,7 @@ async def handle_alarm_switch():
     if alarm_switch.value()==1:
             print("Alarm switch is off")
             ui_state="clock"
+            oled.contrast(128)
             return
     print("Alarm Switch is on,")
     # The switch was turned on, we need to ask for alarm time
@@ -2550,6 +2557,7 @@ async def handle_alarm_switch():
         config["alarmtime"]=alarmtime
         save_config(config)
         TIME_ALARM=alarmtime # Set the global variable
+        oled.contrast(15) #Make the display a bit dimmer
     ui_state="clock"
     
     
@@ -2647,10 +2655,16 @@ async def check_sunrise():
     await set_led3_brightness(SUNRISE_STATE)
 
 async def check_powersave():
-    global wifi_timeout
+    global wifi_timeout,WIFI_OFF
+    
     # Implement powersaving functions if necessary
-    # 1st check, if we are on mains power, this is not necessary
-    if check_powerstate()==0:
+    
+    # 1st check, is the Wifi off deliberatly
+    if WIFI_OFF:
+        return
+    # 2nd check, if we are on mains power, this is not necessary
+    
+    if await check_powerstate()<2: # We are charging or we are connected mains with full battery
         # Let's make sure, that the wifi is on
         await enable_wifi()
         return
